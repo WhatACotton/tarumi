@@ -8,7 +8,6 @@ import (
 
 	firebase "firebase.google.com/go"
 	"github.com/gin-gonic/gin"
-	"github.com/whatacotton/tarumi/internal/models"
 	"google.golang.org/api/option"
 )
 
@@ -18,24 +17,21 @@ const (
 	ClaimEmail           FirebaseClaim = "email"
 	ClaimUserId          FirebaseClaim = "user_id"
 	ClaimIsEmailVerified FirebaseClaim = "email_verified"
+	ClaimDisplayName     FirebaseClaim = "name"
 )
 
 type FirebaseService struct {
 	app *firebase.App
 }
 
-func GetFirebaseService(c *gin.Context) (*FirebaseService, error) {
-	app, err := initFireBase()
-	if err != nil {
-		return nil, err
-	}
+func GetFirebaseService(c *gin.Context,app *firebase.App) (*FirebaseService, error) {
 	s := &FirebaseService{
 		app: app,
 	}
 	return s, nil
 }
 
-func initFireBase() (*firebase.App, error) {
+func InitFireBase() (*firebase.App, error) {
 	projID := os.Getenv("FIREBASE_PROJECT_ID")
 	if projID == "" {
 		log.Fatal("FIREBASE_PROJECT_ID is not set in environment variables")
@@ -51,37 +47,38 @@ func initFireBase() (*firebase.App, error) {
 		return nil, err
 	}
 	return app, nil
-}
+} 
 
-// HeaderのAuthenticationに入っているJWTからEmail,UserID,EmailVerifiedを取得
-func (s *FirebaseService) GetUser(c *gin.Context) (*models.FirebaseUser, error) {
-	user, err := s.getIDToken(c)
-	if err != nil {
-		return nil, err
+func (s *FirebaseService) GetUser(c *gin.Context) (userId string, email string,displayName string,err error) {
+	jwtToken := c.Request.Header.Get("Authorization")
+	if (jwtToken == ""){
+		log.Fatalf("authorization header is empty")
+		return "","", "", errors.New("authorization header is empty")
 	}
-	return user, nil
-}
-
-func (s *FirebaseService) getIDToken(ctx *gin.Context) (*models.FirebaseUser, error) {
-	jwtToken := ctx.Request.Header.Get("Authorization")
-	client, err := s.app.Auth(ctx)
+	client, err := s.app.Auth(c)
 	if err != nil {
 		log.Fatalf("error getting Auth client: %v\n", err)
-		return nil, err
+		return "", "", "", err
 	}
-
-	token, err := client.VerifyIDToken(ctx, jwtToken)
+	token, err := client.VerifyIDToken(c, jwtToken)
 	if err != nil {
 		log.Fatalf("error verifying ID token: %v\n", err)
-		return nil, err
+		return "", "", "", err
 	}
-	user := &models.FirebaseUser{
-		Email:  token.Claims[string(ClaimEmail)].(string),
-		UserID: token.Claims[string(ClaimUserId)].(string),
+	userID := token.Claims[string(ClaimUserId)].(string)
+	if userID == ""{
+		log.Fatalf("invalid token")
+		return "", "", "", errors.New("invalid token")
 	}
-	if user.Email == "" || user.UserID == "" {
-		log.Println("Invalid token: missing email or user_id")
-		return nil, errors.New("invalid token: missing email or user_id")
+	email = token.Claims[string(ClaimEmail)].(string)
+	if email == "" {
+		log.Fatalf("email not found in token claims")
+		return "", "", "", errors.New("email not found in token claims")
 	}
-	return user, nil
+	displayName = token.Claims[string(ClaimDisplayName)].(string)
+	if displayName == "" {
+		displayName = "User"
+	}
+	return userID, email, displayName, nil
 }
+
