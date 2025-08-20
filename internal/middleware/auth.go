@@ -20,11 +20,52 @@ const (
 	ClaimDisplayName     FirebaseClaim = "name"
 )
 
+type CredentialFilePath string
+
+const (
+	TarumiCredentialFile CredentialFilePath = "tarumi_credentials.json"
+)
+
 type FirebaseService struct {
 	app *firebase.App
 }
 
-func GetFirebaseService(c *gin.Context,app *firebase.App) (*FirebaseService, error) {
+func FirebaseMiddleware(r *gin.Engine, app *firebase.App) {
+	r.Use(func(c *gin.Context) {
+		fbservice, err := GetFirebaseService(c, app)
+		if err != nil {
+			c.AbortWithStatusJSON(500, gin.H{"error": "Internal Error"})
+			return
+		}
+		c.Set("firebaseService", fbservice)
+		c.Next()
+	})
+}
+func AuthMiddleware(c *gin.Context) {
+	fbservice, exists := c.Get("firebaseService")
+	if !exists {
+		c.AbortWithStatusJSON(500, gin.H{"error": "Firebase service not initialized"})
+		return
+	}
+	service, ok := fbservice.(*FirebaseService)
+	if !ok {
+		c.AbortWithStatusJSON(500, gin.H{"error": "Invalid Firebase service"})
+		return
+	}
+
+	userID, email, displayName, err := service.GetUser(c)
+	if err != nil {
+		c.AbortWithStatusJSON(401, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	c.Set(string(ClaimUserId), userID)
+	c.Set(string(ClaimEmail), email)
+	c.Set(string(ClaimDisplayName), displayName)
+	c.Next()
+}
+
+func GetFirebaseService(c *gin.Context, app *firebase.App) (*FirebaseService, error) {
 	s := &FirebaseService{
 		app: app,
 	}
@@ -40,20 +81,20 @@ func InitFireBase() (*firebase.App, error) {
 	conf := &firebase.Config{
 		ProjectID: projID,
 	}
-	opt := option.WithCredentialsFile("tarumi_credentials.json")
+	opt := option.WithCredentialsFile(string(TarumiCredentialFile))
 	app, err := firebase.NewApp(context.Background(), conf, opt)
 	if err != nil {
 		log.Fatalf("error initializing app: %v\n", err)
 		return nil, err
 	}
 	return app, nil
-} 
+}
 
-func (s *FirebaseService) GetUser(c *gin.Context) (userId string, email string,displayName string,err error) {
+func (s *FirebaseService) GetUser(c *gin.Context) (userId string, email string, displayName string, err error) {
 	jwtToken := c.Request.Header.Get("Authorization")
-	if (jwtToken == ""){
+	if jwtToken == "" {
 		log.Fatalf("authorization header is empty")
-		return "","", "", errors.New("authorization header is empty")
+		return "", "", "", errors.New("authorization header is empty")
 	}
 	client, err := s.app.Auth(c)
 	if err != nil {
@@ -66,7 +107,7 @@ func (s *FirebaseService) GetUser(c *gin.Context) (userId string, email string,d
 		return "", "", "", err
 	}
 	userID := token.Claims[string(ClaimUserId)].(string)
-	if userID == ""{
+	if userID == "" {
 		log.Fatalf("invalid token")
 		return "", "", "", errors.New("invalid token")
 	}
@@ -81,4 +122,3 @@ func (s *FirebaseService) GetUser(c *gin.Context) (userId string, email string,d
 	}
 	return userID, email, displayName, nil
 }
-

@@ -14,7 +14,8 @@ func Run() {
 	if err != nil {
 		panic("Failed to initialize Firebase: " + err.Error())
 	}
-	handler.HandleUser(r, app)
-	handler.HandleTodo(r, app)
+	middleware.FirebaseMiddleware(r, app)
+	handler.HandleUser(r)
+	handler.HandleTodo(r)
 	r.Run()
 }

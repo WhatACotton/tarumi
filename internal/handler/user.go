@@ -2,30 +2,14 @@ package handler
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/whatacotton/tarumi/internal/middleware"
 	"github.com/whatacotton/tarumi/internal/repository"
-	firebase "firebase.google.com/go"
 )
 
-func HandleUser(r *gin.Engine, app *firebase.App) {
+func HandleUser(r *gin.Engine) {
 	r.POST("/register", func(c *gin.Context) {
-		HandleRegister(c, app)
+		HandleRegister(c)
 	})
-	authHandler := r.Group("/user", func(ctx *gin.Context) {
-		fbservice, err := middleware.GetFirebaseService(ctx, app)
-		if err != nil {
-			ctx.AbortWithStatusJSON(500, gin.H{"error": "Internal Error"})
-			return
-		}
-		ctx.Set("firebaseService", fbservice)
-		userID, _, _, err := fbservice.GetUser(ctx)
-		if err != nil {
-			ctx.AbortWithStatusJSON(401, gin.H{"error": "Unauthorized"})
-			return
-		}
-		ctx.Set("userID", userID)
-		ctx.Next()
-	})
+	authHandler := r.Group("/user")
 	authHandler.POST("/login", HandleLogin)
 }
 
@@ -35,19 +19,23 @@ func HandleLogin(c *gin.Context) {
 	})
 }
 
-
-func HandleRegister(c *gin.Context, app *firebase.App) {
-	fbservice, err := middleware.GetFirebaseService(c, app)
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Internal Error"})
+func HandleRegister(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists || userID == "" {
+		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
 		return
 	}
-	userID, email, name, err := fbservice.GetUser(c)
-	if err != nil {
-		c.JSON(401, gin.H{"error": "Unauthorized"})
+	email, exists := c.Get("email")
+	if !exists || email == "" {
+		c.AbortWithStatusJSON(500, gin.H{"error": "Email not found"})
 		return
 	}
-	user, err := repository.CreateUser(userID, email, name)
+	name, exists := c.Get("displayName")
+	if !exists || name == "" {
+		c.AbortWithStatusJSON(500, gin.H{"error": "Display name not found"})
+		return
+	}
+	user, err := repository.CreateUser(userID.(string), email.(string), name.(string))
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to create user"})
 		return
