@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: tarumi_postgres
+    environment:
+      POSTGRES_DB: tarumi
+      POSTGRES_USER: tarumi_user
+      POSTGRES_PASSWORD: tarumi_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - tarumi_network
+
+  postgres_test:
+    image: postgres:15
+    container_name: tarumi_postgres_test
+    environment:
+      POSTGRES_DB: tarumi_test
+      POSTGRES_USER: tarumi_user
+      POSTGRES_PASSWORD: tarumi_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - tarumi_network
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: tarumi_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@tarumi.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "8081:80"
+    depends_on:
+      - postgres
+      - postgres_test
+    networks:
+      - tarumi_network
+
+volumes:
+  postgres_data:
+  postgres_test_data:
+
+networks:
+  tarumi_network:
+    driver: bridge

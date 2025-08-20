@@ -16,6 +16,7 @@ func HandleTodo(r *gin.Engine) {
 	}
 	authHandler.POST("/create", h.CreateTodo)
 	authHandler.POST("/update", h.UpdateTodo)
+	authHandler.GET("/complete", h.CompleteTodo)
 	authHandler.GET("/delete", h.DeleteTodo)
 	authHandler.GET("/get", h.GetTodoByID)
 	authHandler.GET("/list", h.GetTodosByUserID)
@@ -38,10 +39,7 @@ func (h *TodoHandler) CreateTodo(c *gin.Context) {
 	}
 	todo, err := h.repo.CreateTodo(
 		userID.(string),
-		todoPayload.Title,
-		todoPayload.Description,
-		todoPayload.StartDate,
-		todoPayload.EndDate,
+		todoPayload,
 	)
 	if err != nil {
 		c.AbortWithStatusJSON(500, gin.H{"error": "Failed to create todo"})
@@ -69,10 +67,7 @@ func (h *TodoHandler) UpdateTodo(c *gin.Context) {
 	todo, err := h.repo.UpdateTodo(
 		userID.(string),
 		todoID,
-		todoPayload.Title,
-		todoPayload.Description,
-		todoPayload.StartDate,
-		todoPayload.EndDate,
+		todoPayload,
 	)
 	if err != nil {
 		c.AbortWithStatusJSON(500, gin.H{"error": "Failed to update todo"})
@@ -131,4 +126,31 @@ func (h *TodoHandler) GetTodosByUserID(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"todos": todos})
+}
+
+func (r *TodoHandler) CompleteTodo(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists || userID == "" {
+		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
+		return
+	}
+	todoID, exists := c.GetQuery("id")
+	if !exists || todoID == "" {
+		c.AbortWithStatusJSON(400, gin.H{"error": "Todo ID not found"})
+		return
+	}
+	t := true
+	p := models.TodoUpdatePayload{
+		IsCompleted: &t,
+	}
+	todo, err := r.repo.UpdateTodo(
+		userID.(string),
+		todoID,
+		p,
+	)
+	if err != nil {
+		c.AbortWithStatusJSON(500, gin.H{"error": "Failed to complete todo"})
+		return
+	}
+	c.JSON(200, gin.H{"todo": todo})
 }

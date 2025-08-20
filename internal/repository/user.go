@@ -2,25 +2,69 @@ package repository
 
 import (
 	"time"
+
+	"github.com/whatacotton/tarumi/internal/config"
 	"github.com/whatacotton/tarumi/internal/models"
+	"gorm.io/gorm"
 )
 
 type UserRepository interface {
 	CreateUser(userId string, email string, name string) (*models.User, error)
-	ModifyUserName(userId string, name string) (*models.User, error)
+	ModifyUserName(userId string, p models.UserUpdatePayload) (*models.User, error)
+	GetUserByID(userID string) (*models.User, error)
 }
 
-func CreateUser(userID string, email string, name string) (*models.User, error) {
+func NewUserRepository() UserRepository {
+	return &userRepository{
+		db: config.DB,
+	}
+}
+
+type userRepository struct {
+	db *gorm.DB
+}
+
+func (r *userRepository) CreateUser(userId string, email string, name string) (*models.User, error) {
 	repositoryUser := models.RepositoryUser{
-		UserID:         userID,
+		UserID:         userId,
 		Email:          email,
 		UserName:       name,
 		RegisteredDate: time.Now(),
 		Level:          0,
 		Grade:          string(models.FreeUser),
 	}
-	// if err := db.Create(&repositoryUser).Error; err != nil {
-	// 	return nil, err
-	// }
+
+	if err := r.db.Create(&repositoryUser).Error; err != nil {
+		return nil, err
+	}
+
+	return repositoryUser.ConvertToUser()
+}
+
+func (r *userRepository) ModifyUserName(userId string, p models.UserUpdatePayload) (*models.User, error) {
+	var repositoryUser models.RepositoryUser
+
+	if err := r.db.Where("user_id = ?", userId).First(&repositoryUser).Error; err != nil {
+		return nil, err
+	}
+	if p.UserName == nil || *p.UserName == "" {
+		return nil, gorm.ErrInvalidData
+	}
+
+	repositoryUser.UserName = *p.UserName
+	if err := r.db.Save(&repositoryUser).Error; err != nil {
+		return nil, err
+	}
+
+	return repositoryUser.ConvertToUser()
+}
+
+func (r *userRepository) GetUserByID(userID string) (*models.User, error) {
+	var repositoryUser models.RepositoryUser
+
+	if err := r.db.Where("user_id = ?", userID).First(&repositoryUser).Error; err != nil {
+		return nil, err
+	}
+
 	return repositoryUser.ConvertToUser()
 }

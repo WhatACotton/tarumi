@@ -1,2 +1,4 @@
 .env
 tarumi_credentials.json
+credentials.json
+token.json

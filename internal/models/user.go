@@ -5,14 +5,18 @@ import (
 	"time"
 )
 
+type UserUpdatePayload struct {
+	UserName *string `json:"user_name"`
+}
+
 type RepositoryUser struct {
-	EntryUserID    int `gorm:"primaryKey;autoIncrement"`
-	Email          string
-	UserID         string
-	UserName       string
-	RegisteredDate time.Time
-	Level          int
-	Grade          string
+	EntryUserID    int       `gorm:"primaryKey;autoIncrement"`
+	Email          string    `gorm:"unique;not null"`
+	UserID         string    `gorm:"unique;not null;index"`
+	UserName       string    `gorm:"not null"`
+	RegisteredDate time.Time `gorm:"not null"`
+	Level          int       `gorm:"default:0"`
+	Grade          string    `gorm:"not null;default:'free'"`
 	FriendCode1    string
 	FriendCode2    string
 	FriendCode3    string

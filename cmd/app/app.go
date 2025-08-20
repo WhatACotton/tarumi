@@ -1,12 +1,25 @@
 package app
 
 import (
+	"log"
+
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
+	"github.com/whatacotton/tarumi/internal/config"
 	"github.com/whatacotton/tarumi/internal/handler"
 	"github.com/whatacotton/tarumi/internal/middleware"
 )
 
 func Run() {
+	// Load environment variables from .env file
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using system environment variables")
+	}
+
+	// Initialize database
+	config.InitDB()
+	defer config.CloseDB()
+
 	r := gin.Default()
 
 	middleware.CORS(r)

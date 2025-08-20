@@ -7,27 +7,28 @@ type TodoRegisterPayload struct {
 	Description string    `json:"description"`
 	StartDate   time.Time `json:"start_date"`
 	EndDate     time.Time `json:"end_date"`
+	ParentID    string    `json:"parent_id"`
 }
 
 type TodoUpdatePayload struct {
-	ID          string    `json:"id"`
-	UserID      string    `json:"user_id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	StartDate   time.Time `json:"start_date"`
-	EndDate     time.Time `json:"end_date"`
+	Title       *string    `json:"title"`
+	Description *string    `json:"description"`
+	StartDate   *time.Time `json:"start_date"`
+	EndDate     *time.Time `json:"end_date"`
+	ParentID    *string    `json:"parent_id"`
+	IsCompleted *bool      `json:"is_completed"`
 }
 
-type TodoRepository struct {
-	ID           string
-	UserID       string
-	CreatedAt    time.Time
-	ParentID     string
-	Title        string
+type RepositoryTodo struct {
+	ID           string    `gorm:"primaryKey;type:uuid;default:uuid_generate_v4()"`
+	UserID       string    `gorm:"not null;index"`
+	CreatedAt    time.Time `gorm:"not null"`
+	ParentID     string    `gorm:"index"`
+	Title        string    `gorm:"not null"`
 	Description  string
-	IsCompleted  bool
-	StartDate    time.Time
-	EndDate      time.Time
+	IsCompleted  bool      `gorm:"default:false"`
+	StartDate    time.Time `gorm:"not null"`
+	EndDate      time.Time `gorm:"not null"`
 	ConsumedTime time.Time
 	ExpectedTime time.Time
 }
@@ -56,12 +57,12 @@ type Accomplishment struct {
 	Count int
 }
 
-func (todo Todo) ConvertToRepository() *TodoRepository {
+func (todo Todo) ConvertToRepository() *RepositoryTodo {
 	if todo.ParentID == nil {
 		todo.ParentID = new(string)
 	}
 	*todo.ParentID = ""
-	return &TodoRepository{
+	return &RepositoryTodo{
 		ID:           todo.ID,
 		UserID:       todo.UserID,
 		CreatedAt:    todo.CreatedAt,
@@ -75,7 +76,7 @@ func (todo Todo) ConvertToRepository() *TodoRepository {
 		ExpectedTime: todo.Content.ExpectedTime,
 	}
 }
-func (repoTodo TodoRepository) ConvertToTodo() *Todo {
+func (repoTodo RepositoryTodo) ConvertToTodo() *Todo {
 	var parentID *string
 	if repoTodo.ParentID == "" {
 		parentID = nil
