@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"os"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -10,9 +9,10 @@ import (
 
 func CORS(r *gin.Engine) {
 	r.Use(cors.New(cors.Config{
-		// アクセス許可するオリジン
-		AllowOrigins: []string{
-			os.Getenv("FRONTEND_URL"),
+		// 開発環境では全てのオリジンを許可（本番では適切に制限）
+		AllowOriginFunc: func(origin string) bool {
+			// 開発環境での柔軟な設定
+			return true
 		},
 		// アクセス許可するHTTPメソッド
 		AllowMethods: []string{

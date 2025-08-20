@@ -27,8 +27,12 @@ func Run() {
 	if err != nil {
 		panic("Failed to initialize Firebase: " + err.Error())
 	}
+	handler.HandleLineWebhook(r)
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
 	middleware.FirebaseMiddleware(r, app)
 	handler.HandleUser(r)
 	handler.HandleTodo(r)
-	r.Run()
+	r.Run("0.0.0.0:8080")
 }

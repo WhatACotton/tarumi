@@ -93,27 +93,27 @@ func InitFireBase() (*firebase.App, error) {
 func (s *FirebaseService) GetUser(c *gin.Context) (userId string, email string, displayName string, err error) {
 	jwtToken := c.Request.Header.Get("Authorization")
 	if jwtToken == "" {
-		log.Fatalf("authorization header is empty")
+		log.Printf("authorization header is empty")
 		return "", "", "", errors.New("authorization header is empty")
 	}
 	client, err := s.app.Auth(c)
 	if err != nil {
-		log.Fatalf("error getting Auth client: %v\n", err)
+		log.Printf("error getting Auth client: %v\n", err)
 		return "", "", "", err
 	}
 	token, err := client.VerifyIDToken(c, jwtToken)
 	if err != nil {
-		log.Fatalf("error verifying ID token: %v\n", err)
+		log.Printf("error verifying ID token: %v\n", err)
 		return "", "", "", err
 	}
 	userID := token.Claims[string(ClaimUserId)].(string)
 	if userID == "" {
-		log.Fatalf("invalid token")
+		log.Printf("invalid token")
 		return "", "", "", errors.New("invalid token")
 	}
 	email = token.Claims[string(ClaimEmail)].(string)
 	if email == "" {
-		log.Fatalf("email not found in token claims")
+		log.Printf("email not found in token claims")
 		return "", "", "", errors.New("email not found in token claims")
 	}
 	displayName = token.Claims[string(ClaimDisplayName)].(string)
