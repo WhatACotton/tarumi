@@ -13,7 +13,7 @@ func TestUserRepository_CreateUser(t *testing.T) {
 	email := "test-" + uuid.New().String() + "@example.com"
 	name := "Test User"
 
-	user, err := repo.CreateUser(userID, email, name)
+	user, err := repo.GetUser(userID, email, name)
 	if err != nil {
 		t.Fatalf("Failed to create user: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestUserRepository_GetUserByID(t *testing.T) {
 	name := "Test User"
 
 	// Create a user first
-	_, err := repo.CreateUser(userID, email, name)
+	_, err := repo.GetUser(userID, email, name)
 	if err != nil {
 		t.Fatalf("Failed to create user: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestUserRepository_ModifyUserName(t *testing.T) {
 	name := "Test User"
 
 	// Create a user first
-	_, err := repo.CreateUser(userID, email, name)
+	_, err := repo.GetUser(userID, email, name)
 	if err != nil {
 		t.Fatalf("Failed to create user: %v", err)
 	}

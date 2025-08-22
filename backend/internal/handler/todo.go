@@ -10,16 +10,18 @@ import (
 func HandleTodo(r *gin.Engine) {
 	r.Use(middleware.AuthMiddleware)
 	authHandler := r.Group("/todo")
-	authHandler.Use(middleware.AuthMiddleware)
 	h := &TodoHandler{
 		repo: repository.NewTodoRepository(),
 	}
+	authHandler.Use(middleware.AuthMiddleware)
+
 	authHandler.POST("/create", h.CreateTodo)
 	authHandler.POST("/update", h.UpdateTodo)
 	authHandler.GET("/complete", h.CompleteTodo)
 	authHandler.GET("/delete", h.DeleteTodo)
 	authHandler.GET("/get", h.GetTodoByID)
 	authHandler.GET("/list", h.GetTodosByUserID)
+	authHandler.GET("/group", h.GetTodosByGroupID)
 }
 
 type TodoHandler struct {
@@ -27,7 +29,7 @@ type TodoHandler struct {
 }
 
 func (h *TodoHandler) CreateTodo(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get(string(middleware.ClaimUserId))
 	if !exists || userID == "" {
 		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
 		return
@@ -123,6 +125,25 @@ func (h *TodoHandler) GetTodosByUserID(c *gin.Context) {
 	todos, err := h.repo.GetTodosByUserID(userID.(string))
 	if err != nil {
 		c.AbortWithStatusJSON(500, gin.H{"error": "Failed to retrieve todos"})
+		return
+	}
+	c.JSON(200, gin.H{"todos": todos})
+}
+
+func (h *TodoHandler) GetTodosByGroupID(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists || userID == "" {
+		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
+		return
+	}
+	groupID, exists := c.GetQuery("group_id")
+	if !exists || groupID == "" {
+		c.AbortWithStatusJSON(400, gin.H{"error": "Group ID not found"})
+		return
+	}
+	todos, err := h.repo.GetTodosByGroupID(userID.(string), groupID)
+	if err != nil {
+		c.AbortWithStatusJSON(500, gin.H{"error": "Failed to retrieve todos by group"})
 		return
 	}
 	c.JSON(200, gin.H{"todos": todos})

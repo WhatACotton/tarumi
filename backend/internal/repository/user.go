@@ -9,7 +9,7 @@ import (
 )
 
 type UserRepository interface {
-	CreateUser(userId string, email string, name string) (*models.User, error)
+	GetUser(userId string, email string, name string) (*models.User, error)
 	ModifyUserName(userId string, p models.UserUpdatePayload) (*models.User, error)
 	GetUserByID(userID string) (*models.User, error)
 }
@@ -24,7 +24,7 @@ type userRepository struct {
 	db *gorm.DB
 }
 
-func (r *userRepository) CreateUser(userId string, email string, name string) (*models.User, error) {
+func (r *userRepository) GetUser(userId string, email string, name string) (*models.User, error) {
 	repositoryUser := models.RepositoryUser{
 		UserID:         userId,
 		Email:          email,
@@ -34,7 +34,7 @@ func (r *userRepository) CreateUser(userId string, email string, name string) (*
 		Grade:          string(models.FreeUser),
 	}
 
-	if err := r.db.Create(&repositoryUser).Error; err != nil {
+	if err := r.db.FirstOrCreate(&repositoryUser, models.RepositoryUser{UserID: userId}).Error; err != nil {
 		return nil, err
 	}
 

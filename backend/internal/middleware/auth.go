@@ -96,6 +96,8 @@ func (s *FirebaseService) GetUser(c *gin.Context) (userId string, email string, 
 		log.Printf("authorization header is empty")
 		return "", "", "", errors.New("authorization header is empty")
 	}
+	jwtToken = jwtToken[len("Bearer "):] // Remove "Bearer " prefix
+
 	client, err := s.app.Auth(c)
 	if err != nil {
 		log.Printf("error getting Auth client: %v\n", err)

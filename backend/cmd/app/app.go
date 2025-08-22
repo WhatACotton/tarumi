@@ -34,5 +34,7 @@ func Run() {
 	middleware.FirebaseMiddleware(r, app)
 	handler.HandleUser(r)
 	handler.HandleTodo(r)
+	handler.HandleToken(r)
+	handler.HandleCalendar(r)
 	r.Run("0.0.0.0:8080")
 }
