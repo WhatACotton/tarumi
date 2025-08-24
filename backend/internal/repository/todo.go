@@ -1,11 +1,13 @@
 package repository
 
 import (
+	"log"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/whatacotton/tarumi/internal/config"
 	"github.com/whatacotton/tarumi/internal/models"
+	"github.com/whatacotton/tarumi/internal/service"
 	"gorm.io/gorm"
 )
 
@@ -22,22 +24,37 @@ type TodoRepository interface {
 
 func NewTodoRepository() TodoRepository {
 	return &todoRepository{
-		db: config.DB,
+		db:                config.DB,
+		openrouterService: service.NewOpenRouterService(),
 	}
 }
 
 type todoRepository struct {
-	db *gorm.DB
+	db                *gorm.DB
+	openrouterService *service.OpenRouterService
 }
 
 func (r *todoRepository) CreateTodo(userId string, p models.TodoRegisterPayload) (*models.Todo, error) {
+	log.Printf("[TodoRepo] CreateTodo called for user: %s, title: '%s'", userId, p.Title)
+
+	// OpenRouterでdurationを予測 (improved error handling is in the service layer)
+	log.Printf("[TodoRepo] Calling OpenRouter to estimate duration...")
+	estimatedDuration, err := r.openrouterService.EstimateTaskDuration(p.Title, p.Description)
+	if err != nil {
+		// This should rarely happen now due to improved fallback handling in service
+		log.Printf("[TodoRepo] OpenRouter service returned error: %v, using conservative default", err)
+		estimatedDuration = 45 // Conservative default for unknown errors
+	} else {
+		log.Printf("[TodoRepo] OpenRouter estimated duration: %d minutes", estimatedDuration)
+	}
+
 	todoRepo := &models.RepositoryTodo{
 		ID:           uuid.New().String(),
 		UserID:       userId,
 		Title:        p.Title,
 		Description:  p.Description,
 		DueDate:      p.DueDate,
-		Duration:     0, // デフォルト値、別経由で登録される
+		Duration:     estimatedDuration, // AI予測またはスマートフォールバック
 		IsCompleted:  false,
 		ConsumedTime: 0,
 		CreatedAt:    time.Now(),
@@ -45,29 +62,60 @@ func (r *todoRepository) CreateTodo(userId string, p models.TodoRegisterPayload)
 		GroupID:      p.GroupID,
 	}
 
+	log.Printf("[TodoRepo] Creating todo with ID: %s, duration: %d", todoRepo.ID, todoRepo.Duration)
+
 	if err := r.db.Create(todoRepo).Error; err != nil {
+		log.Printf("[TodoRepo] Database create failed: %v", err)
 		return nil, err
 	}
 
+	log.Printf("[TodoRepo] Todo created successfully with ID: %s", todoRepo.ID)
 	return todoRepo.ConvertToTodo(), nil
 }
 
 func (r *todoRepository) UpdateTodo(userID string, todoID string, p models.TodoUpdatePayload) (*models.Todo, error) {
+	log.Printf("[TodoRepo] UpdateTodo called for user: %s, todo: %s", userID, todoID)
+
 	var todoRepo models.RepositoryTodo
 
 	if err := r.db.Where("id = ? AND user_id = ?", todoID, userID).First(&todoRepo).Error; err != nil {
+		log.Printf("[TodoRepo] Failed to find todo: %v", err)
 		return nil, err
 	}
+
+	// タイトルまたは説明が変更された場合、durationを再計算
+	var shouldRecalculateDuration bool
+
+	if p.Title != nil && *p.Title != todoRepo.Title {
+		log.Printf("[TodoRepo] Title changed from '%s' to '%s'", todoRepo.Title, *p.Title)
+		todoRepo.Title = *p.Title
+		shouldRecalculateDuration = true
+	}
+	if p.Description != nil && *p.Description != todoRepo.Description {
+		log.Printf("[TodoRepo] Description changed, length: %d -> %d", len(todoRepo.Description), len(*p.Description))
+		todoRepo.Description = *p.Description
+		shouldRecalculateDuration = true
+	}
+
+	// Durationの再計算 (improved error handling)
+	if shouldRecalculateDuration {
+		log.Printf("[TodoRepo] Recalculating duration via OpenRouter...")
+		estimatedDuration, err := r.openrouterService.EstimateTaskDuration(todoRepo.Title, todoRepo.Description)
+		if err == nil {
+			log.Printf("[TodoRepo] New estimated duration: %d minutes (was: %d)", estimatedDuration, todoRepo.Duration)
+			todoRepo.Duration = estimatedDuration
+		} else {
+			// The service layer now handles fallbacks internally, so errors should be rare
+			log.Printf("[TodoRepo] Duration recalculation returned error: %v, keeping existing duration: %d", err, todoRepo.Duration)
+		}
+	}
+
 	if p.IsCompleted != nil {
+		log.Printf("[TodoRepo] IsCompleted changed to: %t", *p.IsCompleted)
 		todoRepo.IsCompleted = *p.IsCompleted
 	}
-	if p.Title != nil {
-		todoRepo.Title = *p.Title
-	}
-	if p.Description != nil {
-		todoRepo.Description = *p.Description
-	}
 	if p.DueDate != nil {
+		log.Printf("[TodoRepo] DueDate changed to: %d", *p.DueDate)
 		todoRepo.DueDate = *p.DueDate
 	}
 	if p.ParentID != nil {
@@ -81,13 +129,16 @@ func (r *todoRepository) UpdateTodo(userID string, todoID string, p models.TodoU
 		todoRepo.GroupID = ""
 	}
 	if p.ConsumedTime != nil {
+		log.Printf("[TodoRepo] ConsumedTime changed to: %d minutes", *p.ConsumedTime)
 		todoRepo.ConsumedTime = *p.ConsumedTime
 	}
 
 	if err := r.db.Save(&todoRepo).Error; err != nil {
+		log.Printf("[TodoRepo] Database save failed: %v", err)
 		return nil, err
 	}
 
+	log.Printf("[TodoRepo] Todo updated successfully: %s", todoID)
 	return todoRepo.ConvertToTodo(), nil
 }
 
