@@ -18,15 +18,17 @@ type TodoUpdatePayload struct {
 	IsCompleted  *bool      `json:"is_completed"`
 	GroupID      *string    `json:"group_id"`
 	ConsumedTime *int       `json:"consumed_time"` // 分単位
+	CompletedAt  *time.Time `json:"completed_at"`
 }
 
 type RepositoryTodo struct {
-	ID           string    `gorm:"primaryKey;type:uuid;default:uuid_generate_v4()"`
-	UserID       string    `gorm:"not null;index"`
-	CreatedAt    time.Time `gorm:"not null"`
-	ParentID     string    `gorm:"index"`
-	GroupID      string    `gorm:"index"`
-	Title        string    `gorm:"not null"`
+	ID           string     `gorm:"primaryKey;type:uuid;default:uuid_generate_v4()"`
+	UserID       string     `gorm:"not null;index"`
+	CreatedAt    time.Time  `gorm:"not null"`
+	CompletedAt  *time.Time `gorm:"index"`
+	ParentID     string     `gorm:"index"`
+	GroupID      string     `gorm:"index"`
+	Title        string     `gorm:"not null"`
 	Description  string
 	IsCompleted  bool      `gorm:"default:false"`
 	DueDate      time.Time `gorm:"not null"`
@@ -50,6 +52,7 @@ type TodoContent struct {
 	DueDate      time.Time
 	Duration     int // 分単位
 	ConsumedTime int // 分単位
+	CompletedAt  *time.Time
 }
 
 type Accomplishments []Accomplishment
@@ -73,6 +76,7 @@ func (todo Todo) ConvertToRepository() *RepositoryTodo {
 		ID:           todo.ID,
 		UserID:       todo.UserID,
 		CreatedAt:    todo.CreatedAt,
+		CompletedAt:  todo.Content.CompletedAt,
 		ParentID:     parentIDValue,
 		GroupID:      groupIDValue,
 		Title:        todo.Content.Title,
@@ -112,6 +116,7 @@ func (repoTodo RepositoryTodo) ConvertToTodo() *Todo {
 			DueDate:      repoTodo.DueDate,
 			Duration:     repoTodo.Duration,
 			ConsumedTime: repoTodo.ConsumedTime,
+			CompletedAt:  repoTodo.CompletedAt,
 		},
 	}
 }

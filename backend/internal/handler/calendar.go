@@ -2,13 +2,16 @@ package handler
 
 import (
 	"context"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/whatacotton/tarumi/internal/middleware"
+	"github.com/whatacotton/tarumi/internal/repository"
 	"github.com/whatacotton/tarumi/internal/service"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -26,6 +29,7 @@ func HandleCalendar(r *gin.Engine) {
 	calendarGroup.POST("/events/create", h.CreateEvent)
 	calendarGroup.POST("/debug/first-event", h.DebugFirstEvent)
 	calendarGroup.POST("/events/monthly", h.GetMonthlyEvents)
+	calendarGroup.POST("/gen-todo", h.GenerateTodosToCalendar)
 }
 
 type CalendarHandler struct{}
@@ -377,5 +381,150 @@ func (h *CalendarHandler) DebugFirstEvent(c *gin.Context) {
 			"start":   firstEvent.StartTime,
 			"end":     firstEvent.EndTime,
 		},
+	})
+}
+
+type GenerateTodosRequest struct {
+	OAuthPayload
+	CalendarName        string `json:"calendar_name"`
+	CalendarDescription string `json:"calendar_description"`
+}
+
+// GenerateTodosToCalendar creates a new calendar and registers user's todos as events
+func (h *CalendarHandler) GenerateTodosToCalendar(c *gin.Context) {
+	log.Printf("[CALENDAR] GenerateTodosToCalendar started")
+
+	// Log the raw request body for debugging
+	if body, err := c.GetRawData(); err == nil {
+		log.Printf("[CALENDAR] Raw request body: %s", string(body))
+		// Reset the request body so it can be read again
+		c.Request.Body = io.NopCloser(strings.NewReader(string(body)))
+	}
+
+	var req GenerateTodosRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("[CALENDAR] Error binding request: %v", err)
+		log.Printf("[CALENDAR] Request validation failed")
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid request format",
+			"details": err.Error(),
+			"required_fields": map[string]string{
+				"access_token":         "string (required)",
+				"calendar_name":        "string (optional, default: 'tarumi calendar')",
+				"calendar_description": "string (optional)",
+			},
+		})
+		return
+	}
+
+	// Set default values if not provided
+	if req.CalendarName == "" {
+		req.CalendarName = "tarumi calendar"
+		log.Printf("[CALENDAR] No calendar name provided, using default: '%s'", req.CalendarName)
+	}
+	if req.CalendarDescription == "" {
+		req.CalendarDescription = "Calendar automatically generated from todo tasks"
+		log.Printf("[CALENDAR] No calendar description provided, using default: '%s'", req.CalendarDescription)
+	}
+
+	log.Printf("[CALENDAR] Successfully parsed request:")
+	log.Printf("[CALENDAR]   - Calendar Name: '%s'", req.CalendarName)
+	log.Printf("[CALENDAR]   - Calendar Description: '%s'", req.CalendarDescription)
+	log.Printf("[CALENDAR]   - Access Token present: %t", req.AccessToken != "")
+
+	// Get user ID from middleware
+	userID, exists := c.Get(string(middleware.ClaimUserId))
+	if !exists {
+		log.Printf("[CALENDAR] User ID not found in context")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+	userIDStr, ok := userID.(string)
+	if !ok {
+		log.Printf("[CALENDAR] Invalid user ID type")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	log.Printf("[CALENDAR] Processing request for user: %s", userIDStr)
+
+	// Create calendar service
+	calendarService, err := h.createCalendarService(c, req.AccessToken)
+	if err != nil {
+		log.Printf("[CALENDAR] Error creating calendar service: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create calendar service", "details": err.Error()})
+		return
+	}
+
+	cs := service.NewCalendarService(calendarService)
+
+	// Create new calendar
+	log.Printf("[CALENDAR] Creating new calendar: %s", req.CalendarName)
+	newCalendar, err := cs.CreateCalendar(req.CalendarName, req.CalendarDescription)
+	if err != nil {
+		log.Printf("[CALENDAR] Error creating calendar: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create calendar", "details": err.Error()})
+		return
+	}
+
+	log.Printf("[CALENDAR] Created calendar with ID: %s", newCalendar.Id)
+
+	// Get user's todos
+	todoRepo := repository.NewTodoRepository()
+	todos, err := todoRepo.GetIncompleteTodos(userIDStr)
+	if err != nil {
+		log.Printf("[CALENDAR] Error getting todos: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get todos", "details": err.Error()})
+		return
+	}
+
+	log.Printf("[CALENDAR] Found %d incomplete todos", len(todos))
+
+	// Create events for each todo
+	var createdEvents []service.CalendarEvent
+	eventCreationTime := time.Now()
+
+	for i, todo := range todos {
+		log.Printf("[CALENDAR] Processing todo %d: %s", i+1, todo.Content.Title)
+
+		// Calculate event duration from todo duration (convert minutes to hours)
+		eventDuration := time.Duration(todo.Content.Duration) * time.Minute
+		if eventDuration < 30*time.Minute {
+			eventDuration = 30 * time.Minute // Minimum 30 minutes
+		}
+
+		// Create event starting from creation time + offset for each todo
+		startTime := eventCreationTime.Add(time.Duration(i) * time.Hour)
+		endTime := startTime.Add(eventDuration)
+
+		event := &service.CalendarEvent{
+			Summary:     todo.Content.Title,
+			Description: todo.Content.Description,
+			StartTime:   startTime,
+			EndTime:     endTime,
+		}
+
+		createdEvent, err := cs.CreateEvent(newCalendar.Id, event)
+		if err != nil {
+			log.Printf("[CALENDAR] Error creating event for todo %s: %v", todo.ID, err)
+			continue // Continue with next todo instead of failing completely
+		}
+
+		createdEvents = append(createdEvents, *createdEvent)
+		log.Printf("[CALENDAR] Created event: %s (Start: %v, End: %v)", createdEvent.Summary, createdEvent.StartTime, createdEvent.EndTime)
+	}
+
+	log.Printf("[CALENDAR] Successfully created %d events in calendar %s", len(createdEvents), newCalendar.Id)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Calendar created and todos registered successfully",
+		"calendar": gin.H{
+			"id":          newCalendar.Id,
+			"summary":     newCalendar.Summary,
+			"description": newCalendar.Description,
+		},
+		"events_created":  len(createdEvents),
+		"events":          createdEvents,
+		"todos_processed": len(todos),
 	})
 }

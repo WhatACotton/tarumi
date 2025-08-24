@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/whatacotton/tarumi/internal/middleware"
 	"github.com/whatacotton/tarumi/internal/models"
@@ -164,11 +166,39 @@ func (r *TodoHandler) CompleteTodo(c *gin.Context) {
 		return
 	}
 
-	p := models.TodoUpdatePayload{}
-	if err := c.ShouldBindJSON(&p); err != nil {
-		c.AbortWithStatusJSON(400, gin.H{"error": "Invalid request payload"})
-		return
+	// CompleteTodoは完了フラグとcompletedAtを設定する専用のハンドラとして扱う
+	completedTrue := true
+	now := time.Now()
+
+	p := models.TodoUpdatePayload{
+		IsCompleted: &completedTrue,
+		CompletedAt: &now,
 	}
+
+	// リクエストボディに追加のフィールドがあれば取得
+	requestPayload := models.TodoUpdatePayload{}
+	if err := c.ShouldBindJSON(&requestPayload); err == nil {
+		// 完了時間以外のフィールドがリクエストに含まれている場合はマージ
+		if requestPayload.ConsumedTime != nil {
+			p.ConsumedTime = requestPayload.ConsumedTime
+		}
+		if requestPayload.Title != nil {
+			p.Title = requestPayload.Title
+		}
+		if requestPayload.Description != nil {
+			p.Description = requestPayload.Description
+		}
+		if requestPayload.DueDate != nil {
+			p.DueDate = requestPayload.DueDate
+		}
+		if requestPayload.ParentID != nil {
+			p.ParentID = requestPayload.ParentID
+		}
+		if requestPayload.GroupID != nil {
+			p.GroupID = requestPayload.GroupID
+		}
+	}
+
 	todo, err := r.repo.UpdateTodo(
 		userID.(string),
 		todoID,
@@ -202,7 +232,7 @@ func (r *TodoHandler) InCompleteTodo(c *gin.Context) {
 		p,
 	)
 	if err != nil {
-		c.AbortWithStatusJSON(500, gin.H{"error": "Failed to complete todo"})
+		c.AbortWithStatusJSON(500, gin.H{"error": "Failed to incomplete todo"})
 		return
 	}
 	c.JSON(200, gin.H{"todo": todo})

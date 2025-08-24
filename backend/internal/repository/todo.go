@@ -113,6 +113,20 @@ func (r *todoRepository) UpdateTodo(userID string, todoID string, p models.TodoU
 	if p.IsCompleted != nil {
 		log.Printf("[TodoRepo] IsCompleted changed to: %t", *p.IsCompleted)
 		todoRepo.IsCompleted = *p.IsCompleted
+
+		// 完了状態に応じてCompletedAtを自動設定
+		if *p.IsCompleted {
+			// 完了にする場合、CompletedAtが設定されていなければ現在時刻を設定
+			if todoRepo.CompletedAt == nil {
+				now := time.Now()
+				todoRepo.CompletedAt = &now
+				log.Printf("[TodoRepo] Auto-setting CompletedAt to: %v", now)
+			}
+		} else {
+			// 未完了にする場合、CompletedAtをnullに設定
+			todoRepo.CompletedAt = nil
+			log.Printf("[TodoRepo] Clearing CompletedAt (set to null)")
+		}
 	}
 	if p.DueDate != nil {
 		log.Printf("[TodoRepo] DueDate changed to: %d", *p.DueDate)
@@ -131,6 +145,12 @@ func (r *todoRepository) UpdateTodo(userID string, todoID string, p models.TodoU
 	if p.ConsumedTime != nil {
 		log.Printf("[TodoRepo] ConsumedTime changed to: %d minutes", *p.ConsumedTime)
 		todoRepo.ConsumedTime = *p.ConsumedTime
+	}
+
+	// CompletedAtの明示的な設定（IsCompletedの処理後に実行）
+	if p.CompletedAt != nil {
+		log.Printf("[TodoRepo] Explicitly setting CompletedAt to: %v", *p.CompletedAt)
+		todoRepo.CompletedAt = p.CompletedAt
 	}
 
 	if err := r.db.Save(&todoRepo).Error; err != nil {
