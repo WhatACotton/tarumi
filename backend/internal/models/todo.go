@@ -5,20 +5,19 @@ import "time"
 type TodoRegisterPayload struct {
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
-	StartDate   time.Time `json:"start_date"`
-	EndDate     time.Time `json:"end_date"`
+	DueDate     time.Time `json:"due_date"`
 	ParentID    string    `json:"parent_id"`
 	GroupID     string    `json:"group_id"`
 }
 
 type TodoUpdatePayload struct {
-	Title       *string    `json:"title"`
-	Description *string    `json:"description"`
-	StartDate   *time.Time `json:"start_date"`
-	EndDate     *time.Time `json:"end_date"`
-	ParentID    *string    `json:"parent_id"`
-	IsCompleted *bool      `json:"is_completed"`
-	GroupID     *string    `json:"group_id"`
+	Title        *string    `json:"title"`
+	Description  *string    `json:"description"`
+	DueDate      *time.Time `json:"due_date"`
+	ParentID     *string    `json:"parent_id"`
+	IsCompleted  *bool      `json:"is_completed"`
+	GroupID      *string    `json:"group_id"`
+	ConsumedTime *int       `json:"consumed_time"` // 分単位
 }
 
 type RepositoryTodo struct {
@@ -30,10 +29,9 @@ type RepositoryTodo struct {
 	Title        string    `gorm:"not null"`
 	Description  string
 	IsCompleted  bool      `gorm:"default:false"`
-	StartDate    time.Time `gorm:"not null"`
-	EndDate      time.Time `gorm:"not null"`
-	ConsumedTime time.Time
-	ExpectedTime time.Time
+	DueDate      time.Time `gorm:"not null"`
+	Duration     int       `gorm:"not null"` // 分単位
+	ConsumedTime int       // 分単位
 }
 
 type Todo struct {
@@ -49,10 +47,9 @@ type TodoContent struct {
 	Title        string
 	Description  string
 	IsCompleted  bool
-	StartDate    time.Time
-	EndDate      time.Time
-	ConsumedTime time.Time
-	ExpectedTime time.Time
+	DueDate      time.Time
+	Duration     int // 分単位
+	ConsumedTime int // 分単位
 }
 
 type Accomplishments []Accomplishment
@@ -81,12 +78,12 @@ func (todo Todo) ConvertToRepository() *RepositoryTodo {
 		Title:        todo.Content.Title,
 		Description:  todo.Content.Description,
 		IsCompleted:  todo.Content.IsCompleted,
-		StartDate:    todo.Content.StartDate,
-		EndDate:      todo.Content.EndDate,
+		DueDate:      todo.Content.DueDate,
+		Duration:     todo.Content.Duration,
 		ConsumedTime: todo.Content.ConsumedTime,
-		ExpectedTime: todo.Content.ExpectedTime,
 	}
 }
+
 func (repoTodo RepositoryTodo) ConvertToTodo() *Todo {
 	var parentID *string
 	if repoTodo.ParentID == "" {
@@ -112,10 +109,9 @@ func (repoTodo RepositoryTodo) ConvertToTodo() *Todo {
 			Title:        repoTodo.Title,
 			Description:  repoTodo.Description,
 			IsCompleted:  repoTodo.IsCompleted,
-			StartDate:    repoTodo.StartDate,
-			EndDate:      repoTodo.EndDate,
+			DueDate:      repoTodo.DueDate,
+			Duration:     repoTodo.Duration,
 			ConsumedTime: repoTodo.ConsumedTime,
-			ExpectedTime: repoTodo.ExpectedTime,
 		},
 	}
 }

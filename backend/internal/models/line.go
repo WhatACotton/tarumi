@@ -6,7 +6,10 @@ type ReplyMessage struct {
 	ReplyToken string         `json:"replyToken"`
 	Messages   []MessageEntry `json:"messages"`
 }
-
+type PushMessage struct {
+	To       string         `json:"to"`
+	Messages []MessageEntry `json:"messages"`
+}
 type MessageEntry struct {
 	Type string `json:"type"`
 	Text string `json:"text"`

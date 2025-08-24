@@ -16,6 +16,8 @@ type TodoRepository interface {
 	GetTodoByID(userID string, todoID string) (*models.Todo, error)
 	GetTodosByUserID(userID string) ([]*models.Todo, error)
 	GetTodosByGroupID(userID string, groupID string) ([]*models.Todo, error)
+	GetCompleteTodos(userID string) ([]*models.Todo, error)
+	GetIncompleteTodos(userID string) ([]*models.Todo, error)
 }
 
 func NewTodoRepository() TodoRepository {
@@ -34,11 +36,10 @@ func (r *todoRepository) CreateTodo(userId string, p models.TodoRegisterPayload)
 		UserID:       userId,
 		Title:        p.Title,
 		Description:  p.Description,
-		StartDate:    p.StartDate,
-		EndDate:      p.EndDate,
+		DueDate:      p.DueDate,
+		Duration:     0, // デフォルト値、別経由で登録される
 		IsCompleted:  false,
-		ConsumedTime: time.Time{},
-		ExpectedTime: time.Time{},
+		ConsumedTime: 0,
 		CreatedAt:    time.Now(),
 		ParentID:     p.ParentID,
 		GroupID:      p.GroupID,
@@ -66,11 +67,8 @@ func (r *todoRepository) UpdateTodo(userID string, todoID string, p models.TodoU
 	if p.Description != nil {
 		todoRepo.Description = *p.Description
 	}
-	if p.StartDate != nil {
-		todoRepo.StartDate = *p.StartDate
-	}
-	if p.EndDate != nil {
-		todoRepo.EndDate = *p.EndDate
+	if p.DueDate != nil {
+		todoRepo.DueDate = *p.DueDate
 	}
 	if p.ParentID != nil {
 		todoRepo.ParentID = *p.ParentID
@@ -81,6 +79,9 @@ func (r *todoRepository) UpdateTodo(userID string, todoID string, p models.TodoU
 		todoRepo.GroupID = *p.GroupID
 	} else {
 		todoRepo.GroupID = ""
+	}
+	if p.ConsumedTime != nil {
+		todoRepo.ConsumedTime = *p.ConsumedTime
 	}
 
 	if err := r.db.Save(&todoRepo).Error; err != nil {
@@ -129,6 +130,36 @@ func (r *todoRepository) GetTodosByGroupID(userID string, groupID string) ([]*mo
 	var todoRepos []models.RepositoryTodo
 
 	if err := r.db.Where("user_id = ? AND group_id = ?", userID, groupID).Find(&todoRepos).Error; err != nil {
+		return nil, err
+	}
+
+	todos := make([]*models.Todo, len(todoRepos))
+	for i, todoRepo := range todoRepos {
+		todos[i] = todoRepo.ConvertToTodo()
+	}
+
+	return todos, nil
+}
+
+func (r *todoRepository) GetCompleteTodos(userID string) ([]*models.Todo, error) {
+	var todoRepos []models.RepositoryTodo
+
+	if err := r.db.Where("user_id = ? AND is_completed = ?", userID, true).Find(&todoRepos).Error; err != nil {
+		return nil, err
+	}
+
+	todos := make([]*models.Todo, len(todoRepos))
+	for i, todoRepo := range todoRepos {
+		todos[i] = todoRepo.ConvertToTodo()
+	}
+
+	return todos, nil
+}
+
+func (r *todoRepository) GetIncompleteTodos(userID string) ([]*models.Todo, error) {
+	var todoRepos []models.RepositoryTodo
+
+	if err := r.db.Where("user_id = ? AND is_completed = ?", userID, false).Find(&todoRepos).Error; err != nil {
 		return nil, err
 	}
 

@@ -1,45 +1,98 @@
 package handler
 
 import (
+	"context"
+	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/whatacotton/tarumi/internal/middleware"
 	"github.com/whatacotton/tarumi/internal/service"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/calendar/v3"
+	"google.golang.org/api/option"
 )
 
 func HandleCalendar(r *gin.Engine) {
-	r.Use(middleware.AuthMiddleware)
-	r.Use(middleware.CalendarMiddleware)
+	calendarGroup := r.Group("/calendar")
+	calendarGroup.Use(middleware.AuthMiddleware)
+
 	h := NewCalendarHandler()
-	r.GET("/calendars", h.GetCalendars)
-	r.GET("/events", h.GetEvents)
-	r.POST("/events", h.CreateEvent)
+	calendarGroup.POST("/calendars", h.GetCalendars)
+	calendarGroup.POST("/events", h.GetEvents)
+	calendarGroup.POST("/events/create", h.CreateEvent)
+	calendarGroup.POST("/debug/first-event", h.DebugFirstEvent)
+	calendarGroup.POST("/events/monthly", h.GetMonthlyEvents)
 }
 
 type CalendarHandler struct{}
+
+type OAuthPayload struct {
+	AccessToken string `json:"access_token" binding:"required"`
+	TokenType   string `json:"token_type"`
+}
+
+type GetCalendarsRequest struct {
+	OAuthPayload
+}
+
+type GetEventsRequest struct {
+	OAuthPayload
+	CalendarID string `json:"calendar_id"`
+	TimeMin    string `json:"time_min"`
+	TimeMax    string `json:"time_max"`
+}
 
 func NewCalendarHandler() *CalendarHandler {
 	return &CalendarHandler{}
 }
 
+// createCalendarService creates a Google Calendar service from OAuth token
+func (h *CalendarHandler) createCalendarService(c *gin.Context, accessToken string) (*calendar.Service, error) {
+	// Create OAuth2 token
+	token := &oauth2.Token{
+		AccessToken: accessToken,
+		TokenType:   "Bearer",
+		Expiry:      time.Now().Add(1 * time.Hour),
+	}
+
+	// Create OAuth2 config
+	var clientID, clientSecret string
+	clientID = os.Getenv("GOOGLE_OAUTH_CLIENT_ID")
+	clientSecret = os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+
+	config := &oauth2.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		Scopes:       []string{calendar.CalendarScope, calendar.CalendarEventsScope},
+		Endpoint:     google.Endpoint,
+	}
+
+	// Create HTTP client with OAuth2 token
+	client := config.Client(context.Background(), token)
+
+	// Create calendar service
+	return calendar.NewService(c.Request.Context(), option.WithHTTPClient(client))
+}
+
 // GetCalendars retrieves the list of calendars for the authenticated user
 func (h *CalendarHandler) GetCalendars(c *gin.Context) {
-	calendarService, exists := c.Get("calendarService")
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Calendar service not available"})
+	var req GetCalendarsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format", "details": err.Error()})
 		return
 	}
 
-	googleCalendarService, ok := calendarService.(*calendar.Service)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid calendar service type"})
+	calendarService, err := h.createCalendarService(c, req.AccessToken)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create calendar service", "details": err.Error()})
 		return
 	}
 
-	cs := service.NewCalendarService(googleCalendarService)
+	cs := service.NewCalendarService(calendarService)
 	calendars, err := cs.GetCalendars()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve calendars", "details": err.Error()})
@@ -51,32 +104,28 @@ func (h *CalendarHandler) GetCalendars(c *gin.Context) {
 
 // GetEvents retrieves events from a specific calendar
 func (h *CalendarHandler) GetEvents(c *gin.Context) {
-	calendarService, exists := c.Get("calendarService")
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Calendar service not available"})
+	var req GetEventsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format", "details": err.Error()})
 		return
 	}
 
-	googleCalendarService, ok := calendarService.(*calendar.Service)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid calendar service type"})
+	calendarService, err := h.createCalendarService(c, req.AccessToken)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create calendar service", "details": err.Error()})
 		return
 	}
 
-	calendarID := c.Query("calendar_id")
+	calendarID := req.CalendarID
 	if calendarID == "" {
 		calendarID = "primary" // Default to primary calendar
 	}
 
 	// Parse time range parameters
-	timeMinStr := c.Query("time_min")
-	timeMaxStr := c.Query("time_max")
-
 	var timeMin, timeMax time.Time
-	var err error
 
-	if timeMinStr != "" {
-		timeMin, err = time.Parse(time.RFC3339, timeMinStr)
+	if req.TimeMin != "" {
+		timeMin, err = time.Parse(time.RFC3339, req.TimeMin)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid time_min format. Use RFC3339 format."})
 			return
@@ -85,8 +134,8 @@ func (h *CalendarHandler) GetEvents(c *gin.Context) {
 		timeMin = time.Now().AddDate(0, 0, -7) // Default to 7 days ago
 	}
 
-	if timeMaxStr != "" {
-		timeMax, err = time.Parse(time.RFC3339, timeMaxStr)
+	if req.TimeMax != "" {
+		timeMax, err = time.Parse(time.RFC3339, req.TimeMax)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid time_max format. Use RFC3339 format."})
 			return
@@ -95,7 +144,7 @@ func (h *CalendarHandler) GetEvents(c *gin.Context) {
 		timeMax = time.Now().AddDate(0, 0, 7) // Default to 7 days from now
 	}
 
-	cs := service.NewCalendarService(googleCalendarService)
+	cs := service.NewCalendarService(calendarService)
 	events, err := cs.GetEvents(calendarID, timeMin, timeMax)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve events", "details": err.Error()})
@@ -106,6 +155,7 @@ func (h *CalendarHandler) GetEvents(c *gin.Context) {
 }
 
 type CreateEventRequest struct {
+	OAuthPayload
 	CalendarID  string    `json:"calendar_id"`
 	Summary     string    `json:"summary" binding:"required"`
 	Description string    `json:"description"`
@@ -116,21 +166,15 @@ type CreateEventRequest struct {
 
 // CreateEvent creates a new event in Google Calendar
 func (h *CalendarHandler) CreateEvent(c *gin.Context) {
-	calendarService, exists := c.Get("calendarService")
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Calendar service not available"})
-		return
-	}
-
-	googleCalendarService, ok := calendarService.(*calendar.Service)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid calendar service type"})
-		return
-	}
-
 	var req CreateEventRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format", "details": err.Error()})
+		return
+	}
+
+	calendarService, err := h.createCalendarService(c, req.AccessToken)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create calendar service", "details": err.Error()})
 		return
 	}
 
@@ -143,7 +187,7 @@ func (h *CalendarHandler) CreateEvent(c *gin.Context) {
 		return
 	}
 
-	cs := service.NewCalendarService(googleCalendarService)
+	cs := service.NewCalendarService(calendarService)
 	event := &service.CalendarEvent{
 		Summary:     req.Summary,
 		Description: req.Description,
@@ -161,113 +205,177 @@ func (h *CalendarHandler) CreateEvent(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"event": createdEvent})
 }
 
-type UpdateEventRequest struct {
-	Summary     *string    `json:"summary"`
-	Description *string    `json:"description"`
-	Location    *string    `json:"location"`
-	StartTime   *time.Time `json:"start_time"`
-	EndTime     *time.Time `json:"end_time"`
+// DebugFirstEvent retrieves and logs information about the first calendar's first event
+func (h *CalendarHandler) GetMonthlyEvents(c *gin.Context) {
+	log.Printf("[CALENDAR] Getting monthly events")
+
+	var req OAuthPayload
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("[CALENDAR] Error binding request: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format", "details": err.Error()})
+		return
+	}
+
+	calendarService, err := h.createCalendarService(c, req.AccessToken)
+	if err != nil {
+		log.Printf("[CALENDAR] Error creating calendar service: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create calendar service", "details": err.Error()})
+		return
+	}
+
+	// 現在時刻から1ヶ月後の時刻を計算
+	now := time.Now()
+	oneMonthLater := now.AddDate(0, 1, 0)
+
+	log.Printf("[CALENDAR] Time range: %s to %s", now.Format(time.RFC3339), oneMonthLater.Format(time.RFC3339))
+
+	// プライマリカレンダーから全てのイベントを取得
+	events, err := calendarService.Events.List("primary").
+		TimeMin(now.Format(time.RFC3339)).
+		TimeMax(oneMonthLater.Format(time.RFC3339)).
+		SingleEvents(true).
+		OrderBy("startTime").
+		MaxResults(1000).
+		Do()
+
+	if err != nil {
+		log.Printf("[CALENDAR] Error listing events: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list events"})
+		return
+	}
+
+	log.Printf("[CALENDAR] Found %d events in the next month", len(events.Items))
+
+	// service.CalendarEvent形式に変換
+	var monthlyEvents []service.CalendarEvent
+	for i, item := range events.Items {
+		event := service.CalendarEvent{
+			ID:          item.Id,
+			Summary:     item.Summary,
+			Description: item.Description,
+			Location:    item.Location,
+		}
+
+		// 開始時間の処理
+		if item.Start.DateTime != "" {
+			if t, err := time.Parse(time.RFC3339, item.Start.DateTime); err == nil {
+				event.StartTime = t
+			}
+		} else if item.Start.Date != "" {
+			if t, err := time.Parse("2006-01-02", item.Start.Date); err == nil {
+				event.StartTime = t
+			}
+		}
+
+		// 終了時間の処理
+		if item.End.DateTime != "" {
+			if t, err := time.Parse(time.RFC3339, item.End.DateTime); err == nil {
+				event.EndTime = t
+			}
+		} else if item.End.Date != "" {
+			if t, err := time.Parse("2006-01-02", item.End.Date); err == nil {
+				event.EndTime = t
+			}
+		}
+
+		monthlyEvents = append(monthlyEvents, event)
+
+		// 最初の5個のイベントを詳細ログに出力
+		if i < 5 {
+			log.Printf("[CALENDAR] Event %d: %s (Start: %v, End: %v)", i+1, item.Summary, event.StartTime, event.EndTime)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"events": monthlyEvents,
+		"count":  len(monthlyEvents),
+		"period": gin.H{
+			"start": now.Format(time.RFC3339),
+			"end":   oneMonthLater.Format(time.RFC3339),
+		},
+	})
 }
 
-// UpdateEvent updates an existing event in Google Calendar
-func (h *CalendarHandler) UpdateEvent(c *gin.Context) {
-	calendarService, exists := c.Get("calendarService")
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Calendar service not available"})
-		return
-	}
-
-	googleCalendarService, ok := calendarService.(*calendar.Service)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid calendar service type"})
-		return
-	}
-
-	calendarID := c.Query("calendar_id")
-	if calendarID == "" {
-		calendarID = "primary"
-	}
-
-	eventID := c.Param("eventId")
-	if eventID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Event ID is required"})
-		return
-	}
-
-	var req UpdateEventRequest
+func (h *CalendarHandler) DebugFirstEvent(c *gin.Context) {
+	var req GetCalendarsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format", "details": err.Error()})
 		return
 	}
 
-	// Get existing event to preserve unchanged fields
-	cs := service.NewCalendarService(googleCalendarService)
-
-	// For simplicity, we'll require all fields in this example
-	// In a real implementation, you'd fetch the existing event and merge changes
-	if req.Summary == nil || req.StartTime == nil || req.EndTime == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Summary, start_time, and end_time are required"})
-		return
-	}
-
-	if req.EndTime.Before(*req.StartTime) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "End time must be after start time"})
-		return
-	}
-
-	event := &service.CalendarEvent{
-		Summary:   *req.Summary,
-		StartTime: *req.StartTime,
-		EndTime:   *req.EndTime,
-	}
-
-	if req.Description != nil {
-		event.Description = *req.Description
-	}
-	if req.Location != nil {
-		event.Location = *req.Location
-	}
-
-	updatedEvent, err := cs.UpdateEvent(calendarID, eventID, event)
+	calendarService, err := h.createCalendarService(c, req.AccessToken)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update event", "details": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create calendar service", "details": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"event": updatedEvent})
-}
-
-// DeleteEvent deletes an event from Google Calendar
-func (h *CalendarHandler) DeleteEvent(c *gin.Context) {
-	calendarService, exists := c.Get("calendarService")
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Calendar service not available"})
-		return
-	}
-
-	googleCalendarService, ok := calendarService.(*calendar.Service)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid calendar service type"})
-		return
-	}
-
-	calendarID := c.Query("calendar_id")
-	if calendarID == "" {
-		calendarID = "primary"
-	}
-
-	eventID := c.Param("eventId")
-	if eventID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Event ID is required"})
-		return
-	}
-
-	cs := service.NewCalendarService(googleCalendarService)
-	err := cs.DeleteEvent(calendarID, eventID)
+	// Step 1: Get list of calendars
+	log.Println("=== STEP 1: Getting calendars ===")
+	cs := service.NewCalendarService(calendarService)
+	calendars, err := cs.GetCalendars()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete event", "details": err.Error()})
+		log.Printf("Error getting calendars: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve calendars", "details": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Event deleted successfully"})
+	if len(calendars) == 0 {
+		log.Println("No calendars found")
+		c.JSON(http.StatusNotFound, gin.H{"error": "No calendars found"})
+		return
+	}
+
+	// Log first calendar info
+	firstCalendar := calendars[0]
+	log.Printf("First calendar found:")
+	log.Printf("  - ID: %s", firstCalendar.Id)
+	log.Printf("  - Summary: %s", firstCalendar.Summary)
+	log.Printf("  - Description: %s", firstCalendar.Description)
+	log.Printf("  - Primary: %v", firstCalendar.Primary)
+	log.Printf("  - TimeZone: %s", firstCalendar.TimeZone)
+
+	// Step 2: Get events from first calendar
+	log.Println("=== STEP 2: Getting events from first calendar ===")
+	timeMin := time.Now().AddDate(0, -1, 0) // 1 month ago
+	timeMax := time.Now().AddDate(0, 1, 0)  // 1 month from now
+
+	log.Printf("Time range: %s to %s", timeMin.Format(time.RFC3339), timeMax.Format(time.RFC3339))
+
+	events, err := cs.GetEvents(firstCalendar.Id, timeMin, timeMax)
+	if err != nil {
+		log.Printf("Error getting events: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve events", "details": err.Error()})
+		return
+	}
+
+	if len(events) == 0 {
+		log.Println("No events found in the first calendar")
+		c.JSON(http.StatusNotFound, gin.H{"error": "No events found in the first calendar"})
+		return
+	}
+
+	// Log first event info
+	firstEvent := events[0]
+	log.Printf("First event found:")
+	log.Printf("  - ID: %s", firstEvent.ID)
+	log.Printf("  - Summary: %s", firstEvent.Summary)
+	log.Printf("  - Description: %s", firstEvent.Description)
+	log.Printf("  - Location: %s", firstEvent.Location)
+	log.Printf("  - Start: %s", firstEvent.StartTime.Format(time.RFC3339))
+	log.Printf("  - End: %s", firstEvent.EndTime.Format(time.RFC3339))
+
+	// Return summary info
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Calendar and event information logged successfully",
+		"calendar": gin.H{
+			"id":      firstCalendar.Id,
+			"summary": firstCalendar.Summary,
+		},
+		"event": gin.H{
+			"id":      firstEvent.ID,
+			"summary": firstEvent.Summary,
+			"start":   firstEvent.StartTime,
+			"end":     firstEvent.EndTime,
+		},
+	})
 }

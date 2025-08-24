@@ -47,7 +47,7 @@ func autoMigrate() error {
 	return DB.AutoMigrate(
 		&models.RepositoryUser{},
 		&models.RepositoryTodo{},
-		&models.OAuthToken{},
+		&models.RepositoryTokenQueue{},
 	)
 }
 

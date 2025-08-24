@@ -4,9 +4,10 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/whatacotton/tarumi/internal/repository"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/calendar/v3"
@@ -29,48 +30,48 @@ func CalendarMiddleware(c *gin.Context) {
 		return
 	}
 
-	// Get OAuth token from database
-	tokenRepo := repository.NewOAuthTokenRepository()
-	oauthToken, err := tokenRepo.GetByUserID(userIDStr)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "OAuth token not found. Please authenticate with Google Calendar."})
+	// Get OAuth token from Authorization header
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "OAuth token not provided. Please include Authorization header."})
 		c.Abort()
 		return
 	}
 
-	// Check if token is expired
-	expired, err := tokenRepo.IsExpired(userIDStr)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check token expiration"})
+	// Extract token from "Bearer <token>" format
+	tokenParts := strings.SplitN(authHeader, " ", 2)
+	if len(tokenParts) != 2 || strings.ToLower(tokenParts[0]) != "bearer" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Authorization header format. Use 'Bearer <token>'"})
 		c.Abort()
 		return
 	}
 
-	if expired {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "OAuth token has expired. Please re-authenticate."})
+	accessToken := tokenParts[1]
+	if accessToken == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Empty access token"})
 		c.Abort()
 		return
 	}
 
 	// Create OAuth2 token
 	token := &oauth2.Token{
-		AccessToken:  oauthToken.AccessToken,
-		RefreshToken: oauthToken.RefreshToken,
-		TokenType:    oauthToken.TokenType,
-	}
-	// Create OAuth2 config from environment variables
-	config := &oauth2.Config{
-		ClientID:     os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
-		ClientSecret: os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"),
-		Scopes:       []string{calendar.CalendarScope},
-		Endpoint:     google.Endpoint,
+		AccessToken: accessToken,
+		TokenType:   "Bearer",
+		Expiry:      time.Now().Add(1 * time.Hour), // 仮の有効期限
 	}
 
-	// Validate OAuth credentials
-	if config.ClientID == "" || config.ClientSecret == "" {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "OAuth credentials not configured"})
-		c.Abort()
-		return
+	// Create OAuth2 config from credentials file or environment
+	var clientID, clientSecret string
+
+	// Try to get from environment first
+	clientID = os.Getenv("GOOGLE_OAUTH_CLIENT_ID")
+	clientSecret = os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+
+	config := &oauth2.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		Scopes:       []string{calendar.CalendarScope, calendar.CalendarEventsScope},
+		Endpoint:     google.Endpoint,
 	}
 
 	// Create HTTP client with OAuth2 token
@@ -79,7 +80,7 @@ func CalendarMiddleware(c *gin.Context) {
 	// Create calendar service
 	calendarService, err := calendar.NewService(c.Request.Context(), option.WithHTTPClient(client))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create calendar service"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create calendar service", "details": err.Error()})
 		c.Abort()
 		return
 	}
@@ -88,5 +89,4 @@ func CalendarMiddleware(c *gin.Context) {
 	c.Set("calendarService", calendarService)
 	c.Set("user_id", userIDStr)
 	c.Next()
-
 }

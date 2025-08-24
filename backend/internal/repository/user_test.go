@@ -82,7 +82,7 @@ func TestUserRepository_ModifyUserName(t *testing.T) {
 		UserName: &newName,
 	}
 
-	updatedUser, err := repo.ModifyUserName(userID, updatePayload)
+	updatedUser, err := repo.UpdateUser(userID, updatePayload)
 	if err != nil {
 		t.Fatalf("Failed to modify user name: %v", err)
 	}

@@ -17,7 +17,10 @@ func HandleTodo(r *gin.Engine) {
 
 	authHandler.POST("/create", h.CreateTodo)
 	authHandler.POST("/update", h.UpdateTodo)
-	authHandler.GET("/complete", h.CompleteTodo)
+	authHandler.GET("/complete", h.GetCompleteTodos)
+	authHandler.GET("/incomplete", h.GetIncompleteTodos)
+	authHandler.POST("/complete", h.CompleteTodo)
+	authHandler.POST("/incomplete", h.InCompleteTodo)
 	authHandler.GET("/delete", h.DeleteTodo)
 	authHandler.GET("/get", h.GetTodoByID)
 	authHandler.GET("/list", h.GetTodosByUserID)
@@ -51,7 +54,7 @@ func (h *TodoHandler) CreateTodo(c *gin.Context) {
 }
 
 func (h *TodoHandler) UpdateTodo(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get(string(middleware.ClaimUserId))
 	if !exists || userID == "" {
 		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
 		return
@@ -79,7 +82,7 @@ func (h *TodoHandler) UpdateTodo(c *gin.Context) {
 }
 
 func (h *TodoHandler) DeleteTodo(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get(string(middleware.ClaimUserId))
 	if !exists || userID == "" {
 		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
 		return
@@ -98,7 +101,7 @@ func (h *TodoHandler) DeleteTodo(c *gin.Context) {
 }
 
 func (h *TodoHandler) GetTodoByID(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get(string(middleware.ClaimUserId))
 	if !exists || userID == "" {
 		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
 		return
@@ -117,7 +120,7 @@ func (h *TodoHandler) GetTodoByID(c *gin.Context) {
 }
 
 func (h *TodoHandler) GetTodosByUserID(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get(string(middleware.ClaimUserId))
 	if !exists || userID == "" {
 		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
 		return
@@ -131,7 +134,7 @@ func (h *TodoHandler) GetTodosByUserID(c *gin.Context) {
 }
 
 func (h *TodoHandler) GetTodosByGroupID(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get(string(middleware.ClaimUserId))
 	if !exists || userID == "" {
 		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
 		return
@@ -150,7 +153,7 @@ func (h *TodoHandler) GetTodosByGroupID(c *gin.Context) {
 }
 
 func (r *TodoHandler) CompleteTodo(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get(string(middleware.ClaimUserId))
 	if !exists || userID == "" {
 		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
 		return
@@ -160,7 +163,36 @@ func (r *TodoHandler) CompleteTodo(c *gin.Context) {
 		c.AbortWithStatusJSON(400, gin.H{"error": "Todo ID not found"})
 		return
 	}
-	t := true
+
+	p := models.TodoUpdatePayload{}
+	if err := c.ShouldBindJSON(&p); err != nil {
+		c.AbortWithStatusJSON(400, gin.H{"error": "Invalid request payload"})
+		return
+	}
+	todo, err := r.repo.UpdateTodo(
+		userID.(string),
+		todoID,
+		p,
+	)
+	if err != nil {
+		c.AbortWithStatusJSON(500, gin.H{"error": "Failed to complete todo"})
+		return
+	}
+	c.JSON(200, gin.H{"todo": todo})
+}
+
+func (r *TodoHandler) InCompleteTodo(c *gin.Context) {
+	userID, exists := c.Get(string(middleware.ClaimUserId))
+	if !exists || userID == "" {
+		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
+		return
+	}
+	todoID, exists := c.GetQuery("id")
+	if !exists || todoID == "" {
+		c.AbortWithStatusJSON(400, gin.H{"error": "Todo ID not found"})
+		return
+	}
+	t := false
 	p := models.TodoUpdatePayload{
 		IsCompleted: &t,
 	}
@@ -174,4 +206,32 @@ func (r *TodoHandler) CompleteTodo(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"todo": todo})
+}
+
+func (r *TodoHandler) GetCompleteTodos(c *gin.Context) {
+	userID, exists := c.Get(string(middleware.ClaimUserId))
+	if !exists || userID == "" {
+		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
+		return
+	}
+	todos, err := r.repo.GetCompleteTodos(userID.(string))
+	if err != nil {
+		c.AbortWithStatusJSON(500, gin.H{"error": "Failed to retrieve complete todos"})
+		return
+	}
+	c.JSON(200, gin.H{"todos": todos})
+}
+
+func (r *TodoHandler) GetIncompleteTodos(c *gin.Context) {
+	userID, exists := c.Get(string(middleware.ClaimUserId))
+	if !exists || userID == "" {
+		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
+		return
+	}
+	todos, err := r.repo.GetIncompleteTodos(userID.(string))
+	if err != nil {
+		c.AbortWithStatusJSON(500, gin.H{"error": "Failed to retrieve incomplete todos"})
+		return
+	}
+	c.JSON(200, gin.H{"todos": todos})
 }

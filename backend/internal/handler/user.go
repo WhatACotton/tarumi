@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
+	"github.com/whatacotton/tarumi/internal/lib"
 	"github.com/whatacotton/tarumi/internal/middleware"
 	"github.com/whatacotton/tarumi/internal/models"
 	"github.com/whatacotton/tarumi/internal/repository"
@@ -16,6 +19,7 @@ func HandleUser(r *gin.Engine) {
 	authHandler.Use(middleware.AuthMiddleware)
 	authHandler.POST("/login", HandleLogin)
 	authHandler.POST("/rename", h.HandleRename)
+	authHandler.GET("/gencode", h.HandleGenerateCode)
 }
 
 type UserHandler struct {
@@ -60,10 +64,31 @@ func (h *UserHandler) HandleRename(c *gin.Context) {
 		return
 	}
 
-	user, err := h.repo.ModifyUserName(userID.(string), payload)
+	user, err := h.repo.UpdateUser(userID.(string), payload)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to modify user name"})
 		return
 	}
 	c.JSON(200, gin.H{"user": user})
+}
+
+func (h *UserHandler) HandleGenerateCode(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists || userID == "" {
+		c.AbortWithStatusJSON(401, gin.H{"error": "User ID not found"})
+		return
+	}
+
+	code, err := lib.CreateNanoid()
+	if err != nil {
+		c.AbortWithStatusJSON(500, gin.H{"error": "Failed to generate code"})
+		return
+	}
+	fmt.Println("Generated code:", code)
+	repository.NewTokenQueueDBRepository().Enqueue(models.RepositoryTokenQueue{
+		Token:  code,
+		UserID: userID.(string),
+	})
+
+	c.JSON(200, gin.H{"code": code})
 }

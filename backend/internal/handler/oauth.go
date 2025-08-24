@@ -3,50 +3,48 @@ package handler
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/whatacotton/tarumi/internal/middleware"
-	"github.com/whatacotton/tarumi/internal/models"
-	"github.com/whatacotton/tarumi/internal/repository"
 )
 
 func HandleToken(r *gin.Engine) {
 	authHandler := r.Group("/token")
 	authHandler.Use(middleware.AuthMiddleware)
-	h := OAuthHandler{
-		repo: repository.NewOAuthTokenRepository(),
-	}
-	authHandler.POST("/save", h.SaveToken)
+
+	h := OAuthHandler{}
+	authHandler.POST("/validate", h.ValidateToken)
 }
 
-type OAuthHandler struct {
-	repo repository.OAuthTokenRepository
+type OAuthHandler struct{}
+
+type TokenRequest struct {
+	AccessToken string `json:"access_token" binding:"required"`
+	TokenType   string `json:"token_type"`
 }
 
-func (h *OAuthHandler) SaveToken(c *gin.Context) {
+// ValidateToken はフロントエンドから送信されたアクセストークンの検証を行います
+func (h *OAuthHandler) ValidateToken(c *gin.Context) {
 	userID, exists := c.Get(string(middleware.ClaimUserId))
 	if !exists || userID == "" {
 		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
 		return
 	}
-	eventPayload := models.OAuthTokenPayload{}
-	if err := c.ShouldBindJSON(&eventPayload); err != nil {
-		c.AbortWithStatusJSON(400, gin.H{"error": "Invalid request payload"})
+
+	var tokenReq TokenRequest
+	if err := c.ShouldBindJSON(&tokenReq); err != nil {
+		c.AbortWithStatusJSON(400, gin.H{"error": "Invalid token payload"})
 		return
 	}
-	userID, exists = c.Get(string(middleware.ClaimUserId))
-	if !exists || userID == "" {
-		c.AbortWithStatusJSON(500, gin.H{"error": "User ID not found"})
+
+	// トークンが提供されているかチェック
+	if tokenReq.AccessToken == "" {
+		c.AbortWithStatusJSON(400, gin.H{"error": "Access token is required"})
 		return
 	}
-	token := &models.OAuthToken{
-		UserID:       userID.(string),
-		AccessToken:  eventPayload.AccessToken,
-		RefreshToken: eventPayload.RefreshToken,
-		TokenType:    eventPayload.TokenType,
-		ExpiresAt:    eventPayload.ExpiresAt,
-	}
-	err := h.repo.Update(token)
-	if err != nil {
-		c.AbortWithStatusJSON(500, gin.H{"error": "Failed to create event"})
-		return
-	}
-	c.JSON(200, gin.H{"event": eventPayload})
+
+	// 成功レスポンス
+	c.JSON(200, gin.H{
+		"message":    "Token validated successfully",
+		"user_id":    userID,
+		"token_type": tokenReq.TokenType,
+		"has_token":  true,
+	})
 }
