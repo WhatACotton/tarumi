@@ -37,15 +37,14 @@ type todoRepository struct {
 func (r *todoRepository) CreateTodo(userId string, p models.TodoRegisterPayload) (*models.Todo, error) {
 	log.Printf("[TodoRepo] CreateTodo called for user: %s, title: '%s'", userId, p.Title)
 
-	// OpenRouterでdurationを予測 (improved error handling is in the service layer)
-	log.Printf("[TodoRepo] Calling OpenRouter to estimate duration...")
-	estimatedDuration, err := r.openrouterService.EstimateTaskDuration(p.Title, p.Description)
+	// OpenRouterでdurationとジャンルを一括推論
+	estimatedDuration, inferredGenre, err := service.InferDurationAndGenreWithOpenRouter(p.Title, p.Description)
 	if err != nil {
-		// This should rarely happen now due to improved fallback handling in service
-		log.Printf("[TodoRepo] OpenRouter service returned error: %v, using conservative default", err)
-		estimatedDuration = 45 // Conservative default for unknown errors
+		log.Printf("[TodoRepo] OpenRouter inference error: %v, using defaults", err)
+		estimatedDuration = 45
+		inferredGenre = "other"
 	} else {
-		log.Printf("[TodoRepo] OpenRouter estimated duration: %d minutes", estimatedDuration)
+		log.Printf("[TodoRepo] OpenRouter estimated duration: %d minutes, genre: %s", estimatedDuration, inferredGenre)
 	}
 
 	todoRepo := &models.RepositoryTodo{
@@ -60,6 +59,7 @@ func (r *todoRepository) CreateTodo(userId string, p models.TodoRegisterPayload)
 		CreatedAt:    time.Now(),
 		ParentID:     p.ParentID,
 		GroupID:      p.GroupID,
+		Genre:        inferredGenre,
 	}
 
 	log.Printf("[TodoRepo] Creating todo with ID: %s, duration: %d", todoRepo.ID, todoRepo.Duration)
@@ -97,16 +97,17 @@ func (r *todoRepository) UpdateTodo(userID string, todoID string, p models.TodoU
 		shouldRecalculateDuration = true
 	}
 
-	// Durationの再計算 (improved error handling)
+	// Durationとジャンルの再推論 (improved error handling)
 	if shouldRecalculateDuration {
-		log.Printf("[TodoRepo] Recalculating duration via OpenRouter...")
-		estimatedDuration, err := r.openrouterService.EstimateTaskDuration(todoRepo.Title, todoRepo.Description)
+		log.Printf("[TodoRepo] Recalculating duration and genre via OpenRouter...")
+		estimatedDuration, inferredGenre, err := service.InferDurationAndGenreWithOpenRouter(todoRepo.Title, todoRepo.Description)
 		if err == nil {
-			log.Printf("[TodoRepo] New estimated duration: %d minutes (was: %d)", estimatedDuration, todoRepo.Duration)
+			log.Printf("[TodoRepo] New estimated duration: %d minutes (was: %d), genre: %s (was: %s)", estimatedDuration, todoRepo.Duration, inferredGenre, todoRepo.Genre)
 			todoRepo.Duration = estimatedDuration
+			todoRepo.Genre = inferredGenre
 		} else {
 			// The service layer now handles fallbacks internally, so errors should be rare
-			log.Printf("[TodoRepo] Duration recalculation returned error: %v, keeping existing duration: %d", err, todoRepo.Duration)
+			log.Printf("[TodoRepo] Duration/genre recalculation returned error: %v, keeping existing values: duration=%d, genre=%s", err, todoRepo.Duration, todoRepo.Genre)
 		}
 	}
 

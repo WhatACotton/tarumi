@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -254,4 +255,130 @@ func (cs *CalendarService) CreateCalendar(summary, description string) (*calenda
 
 	log.Printf("[CALENDAR_SERVICE] CreateCalendar completed successfully")
 	return createdCalendar, nil
+}
+
+// TaskToSchedule represents a task that needs to be scheduled
+type TaskToSchedule struct {
+	Title           string
+	Description     string
+	DurationMinutes int
+	Deadline        time.Time
+}
+
+// ScheduleTasksIntelligentlyWithFallback uses AI to create a complete schedule with specific time slots
+func (cs *CalendarService) ScheduleTasksIntelligentlyWithFallback(calendarID string, tasks []TaskToSchedule, maxDays int) ([]*CalendarEvent, error) {
+	return cs.ScheduleTasksIntelligentlyWithStartTime(calendarID, tasks, maxDays, 6, 30) // デフォルト 6:30 AM
+}
+
+// ScheduleTasksIntelligentlyWithStartTime uses AI to create a complete schedule with custom start time
+func (cs *CalendarService) ScheduleTasksIntelligentlyWithStartTime(calendarID string, tasks []TaskToSchedule, maxDays int, startHour, startMinute int) ([]*CalendarEvent, error) {
+	if len(tasks) == 0 {
+		log.Printf("[CALENDAR_SERVICE] No tasks to schedule")
+		return []*CalendarEvent{}, nil
+	}
+
+	// Convert tasks to pointer slice
+	var taskPointers []*TaskToSchedule
+	for i := range tasks {
+		taskPointers = append(taskPointers, &tasks[i])
+	}
+
+	// Use AI to create complete schedule with time allocation and custom start time
+	openRouterService := NewOpenRouterService()
+	aiScheduledTasks, err := openRouterService.ScheduleTasksWithAIAndStartTime(taskPointers, time.Now(), startHour, startMinute)
+	if err != nil {
+		log.Printf("[CALENDAR_SERVICE] AI scheduling failed: %v", err)
+		return []*CalendarEvent{}, fmt.Errorf("failed to generate AI schedule: %w", err)
+	}
+
+	log.Printf("[CALENDAR_SERVICE] AI generated schedule for %d tasks", len(aiScheduledTasks))
+
+	// Create calendar events from AI scheduled tasks
+	var createdEvents []*CalendarEvent
+	for _, scheduledTask := range aiScheduledTasks {
+		if scheduledTask.StartTime == nil || scheduledTask.EndTime == nil {
+			log.Printf("[CALENDAR_SERVICE] Skipping task '%s': no valid time slot (fits_deadline: %t)",
+				scheduledTask.Title, scheduledTask.FitsDeadline)
+			continue
+		}
+
+		log.Printf("[CALENDAR_SERVICE] AI Scheduled - Task: %s | Time: %s to %s | Reasoning: %s",
+			scheduledTask.Title,
+			scheduledTask.StartTime.Format("15:04"),
+			scheduledTask.EndTime.Format("15:04"),
+			scheduledTask.Reasoning)
+
+		// Create the calendar event
+		event, err := cs.CreateEvent(calendarID, &CalendarEvent{
+			Summary:     scheduledTask.Title,
+			Description: scheduledTask.Description,
+			StartTime:   *scheduledTask.StartTime,
+			EndTime:     *scheduledTask.EndTime,
+		})
+
+		if err != nil {
+			log.Printf("[CALENDAR_SERVICE] Failed to create event for '%s': %v", scheduledTask.Title, err)
+			continue
+		}
+
+		log.Printf("[CALENDAR_SERVICE] Successfully scheduled '%s' from %s to %s",
+			scheduledTask.Title,
+			scheduledTask.StartTime.Format("15:04"),
+			scheduledTask.EndTime.Format("15:04"))
+
+		createdEvents = append(createdEvents, event)
+	}
+
+	log.Printf("[CALENDAR_SERVICE] AI Scheduling completed. Created %d events", len(createdEvents))
+	return createdEvents, nil
+}
+
+// FindTarumiCalendar finds or creates the tarumi calendar
+func (cs *CalendarService) FindTarumiCalendar() (*calendar.CalendarListEntry, error) {
+	calendars, err := cs.GetCalendars()
+	if err != nil {
+		return nil, err
+	}
+
+	// Look for existing tarumi calendar
+	for _, cal := range calendars {
+		if cal.Summary == "tarumi_calendar" {
+			return cal, nil
+		}
+	}
+
+	// Create new tarumi calendar if not found
+	newCal, err := cs.CreateCalendar("tarumi_calendar", "AI-powered task scheduling calendar")
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to CalendarListEntry format
+	return &calendar.CalendarListEntry{
+		Id:      newCal.Id,
+		Summary: newCal.Summary,
+	}, nil
+}
+
+// DeleteCalendar deletes a calendar
+func (cs *CalendarService) DeleteCalendar(calendarID string) error {
+	err := cs.service.Calendars.Delete(calendarID).Do()
+	if err != nil {
+		log.Printf("[CALENDAR_SERVICE] Failed to delete calendar %s: %v", calendarID, err)
+		return err
+	}
+	log.Printf("[CALENDAR_SERVICE] Successfully deleted calendar %s", calendarID)
+	return nil
+}
+
+// GenerateBusinessHourSlots generates placeholder slots (not needed for AI scheduling)
+func (cs *CalendarService) GenerateBusinessHourSlots(startTime, endTime time.Time) []interface{} {
+	log.Printf("[CALENDAR_SERVICE] GenerateBusinessHourSlots called but not needed for AI scheduling")
+	return []interface{}{}
+}
+
+// GetAvailableTimeSlotsWithConflicts placeholder for compatibility
+func (cs *CalendarService) GetAvailableTimeSlotsWithConflicts(calendarID string, startTime, endTime time.Time, taskDurationMinutes int, conflictEvents []*CalendarEvent) ([]interface{}, error) {
+	log.Printf("[CALENDAR_SERVICE] GetAvailableTimeSlotsWithConflicts called but not needed for AI scheduling")
+	return []interface{}{}, nil
 }

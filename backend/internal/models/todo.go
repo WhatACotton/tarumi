@@ -34,6 +34,7 @@ type RepositoryTodo struct {
 	DueDate      time.Time `gorm:"not null"`
 	Duration     int       `gorm:"not null"` // 分単位
 	ConsumedTime int       // 分単位
+	Genre        string    `gorm:"type:varchar(32);index"`
 }
 
 type Todo struct {
@@ -53,6 +54,14 @@ type TodoContent struct {
 	Duration     int // 分単位
 	ConsumedTime int // 分単位
 	CompletedAt  *time.Time
+	Genre        string
+}
+
+type TodoSummaries []TodoSummary
+
+type TodoSummary struct {
+	Genre string `json:"genre"`
+	Count int    `json:"count"`
 }
 
 type Accomplishments []Accomplishment
@@ -85,6 +94,7 @@ func (todo Todo) ConvertToRepository() *RepositoryTodo {
 		DueDate:      todo.Content.DueDate,
 		Duration:     todo.Content.Duration,
 		ConsumedTime: todo.Content.ConsumedTime,
+		Genre:        todo.Content.Genre,
 	}
 }
 
@@ -117,6 +127,7 @@ func (repoTodo RepositoryTodo) ConvertToTodo() *Todo {
 			Duration:     repoTodo.Duration,
 			ConsumedTime: repoTodo.ConsumedTime,
 			CompletedAt:  repoTodo.CompletedAt,
+			Genre:        repoTodo.Genre,
 		},
 	}
 }
